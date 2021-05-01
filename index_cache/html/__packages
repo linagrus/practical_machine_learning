@@ -1,0 +1,13 @@
+base
+knitr
+lattice
+ggplot2
+caret
+tibble
+bitops
+rattle
+rpart
+rpart.plot
+randomForest
+corrplot
+gbm
