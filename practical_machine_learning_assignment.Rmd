@@ -1,0 +1,183 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Lina"
+date: "30/04/2021"
+output:
+  html_document:
+    keep_md: yes
+---
+#Executive Summary
+Using various devices it is now possible to collect a large amount of data about personal activity relatively inexpensively. People regularly quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we are going to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants that performed barbell lifts correctly and incorrectly in 5 different ways:
+- exactly according to the specification (Class A)
+- throwing the elbows to the front (Class B)
+- lifting the dumbbell only halfway (Class C)
+- lowering the dumbbell only halfway (Class D)
+- throwing the hips to the front (Class E)
+The goal of this project is to predict the manner in which they did the exercise.
+
+This report describes how the model has been built, usage of the cross validation, what the expected out of sample error is, and which model performed the best. The best performing model is then used to predict 20 different test cases.
+
+#Data Source
+The data for this project came from [this source](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har).
+The training data set is available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and the test data set could be found [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv).
+
+#Preparing for Modelling
+##Step 1: Loading the data and libraries
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+We are going to load some libraries needed for analysis and modeling.
+```{r libraries,warning=FALSE,message=FALSE,include=FALSE,echo=FALSE}
+library(knitr)
+library(caret)
+library(rattle)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(gbm)
+```
+
+Next, we download the data using urls provided and set the seed for reproducibility.
+```{r datasources}
+# URLs for downloading the data files
+training.url <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testing.url  <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+# download the datasets
+training <- read.csv(url(training.url))
+testing  <- read.csv(url(testing.url))
+
+# Set seed for reproducibility
+set.seed(1357)
+```
+
+##Step 2: Data Cleaning
+Let's look at the dimensions of both data sets and variables.
+Dimensions of the training data set are `r dim(training)` and dimensions of the testing data set are `r dim(testing)`.
+
+In order to reduce the data set to avoid over-fitting, we are are going to remove variables with almost no variance.
+```{r nearzero}
+# remove variables with Nearly Zero Variance
+nzv <- nearZeroVar(training)
+training.subset <- training[, -nzv]
+dim(training.subset)
+```
+
+Next, we are going to remove variables that are mostly NAs (more than 95%) as they are not useful for modeling and may easily lead to over-fitting.
+```{r MostlyNA}
+# remove variables that are mostly NA
+mostlyNA <- sapply(training.subset, function(x) mean(is.na(x))) > 0.95
+training.subset <- training.subset[, mostlyNA==FALSE]
+dim(training.subset)
+```
+
+We are now going to remove non-numeric variables as they are timestamps or used for identification purposes.
+```{r}
+# remove non-numeric only variables (columns 1 to 5)
+training.subset <- training.subset[, -(1:7)]
+dim(training.subset)
+```
+
+We are left with 54 variables.
+
+##Step 3: Data Partioning, cross validation and out-of-sample error
+We are going to split training data set to training and testing data subsets for cross-validation. We are going to split data using 70% and 30% proportions, respectively. We will train the model with 5-folds cross-validation to estimate an out-of-sample error. The expected value of the out-of-sample error shows the ratio of expected number of misclassified observations and total observations in the test data set.
+
+```{r datasets}
+# partition the training data set 
+TrainList  <- createDataPartition(training.subset$classe, p=0.7, list=FALSE)
+train.subset <- training.subset[TrainList, ]
+test.subset  <- training.subset[-TrainList, ]
+dim(train.subset)
+dim(test.subset)
+```
+
+#Modelling
+##Model 1: Decision Tree
+The first model we are going to use is the decision tree using 5-folds cross-validation.
+###Model
+```{r, cache = TRUE}
+controlDT <- trainControl(method="cv", number=5, verboseIter=FALSE)
+DTmodel<- train(classe ~. , data=train.subset, method= "rpart", trControl=controlDT)
+fancyRpartPlot(DTmodel$finalModel)
+```
+
+###Prediction
+```{r, cache = TRUE}
+DTprediction<- predict(DTmodel, test.subset)
+CMDT <- confusionMatrix(DTprediction, as.factor(test.subset$classe))
+CMDT
+```
+
+```{r}
+plot(CMDT$table, col = CMDT$byClass, 
+     main = paste("Decision Tree Accuracy =",
+                  round(CMDT$overall['Accuracy'], 3)))
+```
+From the Decision Tree Model we see the prediction accuracy is only 49%, so we need to look for a better model.
+
+##Model 2: Random Forest
+Next, we are going to try using Random Forest.
+###Model
+```{r, cache = TRUE}
+controlRF <- trainControl(method="cv", number=5, verboseIter=FALSE)
+RFmodel <- train(classe ~ ., data=train.subset, method="rf",
+                          trControl=controlRF)
+RFmodel$finalModel
+```
+
+###Prediction
+```{r, cache = TRUE}
+RFprediction <- predict(RFmodel, test.subset)
+CMRF <- confusionMatrix(RFprediction, as.factor(test.subset$classe))
+CMRF
+```
+
+```{r}
+plot(CMRF$table, col = CMRF$byClass, 
+     main = paste("Random Forest Accuracy =",
+                  round(CMRF$overall['Accuracy'], 3)))
+```
+From the Random Forest Model we see the prediction accuracy is over 99%. This is a great result, but we will test the third model for comparison.
+
+##Model 3: Gradient Boosting Model and Prediction
+Lastly, we are going to try using GBM.
+###Model
+```{r, cache = TRUE}
+controlGBM <- trainControl(method="cv", number=5, verboseIter=FALSE)
+GBMmodel  <- train(classe ~ ., data=train.subset, method = "gbm",
+                    trControl = controlGBM, verbose = FALSE)
+GBMmodel$finalModel
+```
+
+###Prediction
+```{r, cache = TRUE}
+GBMprediction <- predict(GBMmodel, newdata=test.subset)
+CMGBM <- confusionMatrix(GBMprediction, as.factor(test.subset$classe))
+CMGBM
+```
+From the Gradient Boosting Model we see the prediction accuracy is 96% which is satisfied.
+
+```{r}
+plot(CMGBM$table, col = CMGBM$byClass, 
+     main = paste("GBM Accuracy ", round(CMGBM$overall['Accuracy'], 3)))
+
+```
+
+#Conclusions
+## Result
+The confusion matrices show that the Random Forest algorithm with 0.993 accuracy performs better then Decision Tree model (0.491 accuracy) or GBM (0.959 accuracy), so we are going to choose Random Forest algorithm as the final one. 
+
+### Expected out-of-sample error
+The expected out-of-sample error is estimated at 0.007, or 0.7%. It is calculated as 1 - accuracy for predictions made against the cross-validation set. 
+
+With such a high accuracy and 20 data points in the test data set, we expect all or almost all predictions to be correct.
+
+#Submission
+We are going to use Random Forest algorithm to predict answers to the quiz.
+
+```{r}
+test_predict <- predict(RFmodel, testing)
+test_predict
+```
